@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Analysis and Emailing Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Simple animation for the loader */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .loader {
+            border: 4px solid rgba(0, 0, 0, .1);
+            border-left-color: #4f46e5;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        /* Custom scrollbar for result box */
+        .result-box::-webkit-scrollbar {
+            width: 8px;
+        }
+        .result-box::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 10px;
+        }
+        .result-box::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+        .result-box::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 flex items-center justify-center min-h-screen px-4">
+
+    <div class="w-full max-w-2xl mx-auto">
+        <div class="bg-white rounded-xl shadow-lg p-6 md:p-10">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-slate-900">PDF Analyzer</h1>
+                <p class="text-slate-500 mt-2">Upload a PDF, provide a prompt, and get an AI-powered analysis.</p>
+            </div>
+
+            <form id="analysis-form" class="space-y-6">
+                <!-- Step 1: Email -->
+                <div>
+                    <label for="email" class="block text-sm font-medium text-slate-700 mb-1">Recipient Email</label>
+                    <input type="email" id="email" name="email" required class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="you@example.com">
+                </div>
+
+                <!-- Step 2: PDF Upload -->
+                <div>
+                    <label for="pdf-upload" class="block text-sm font-medium text-slate-700 mb-1">Upload PDF</label>
+                    <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-300 border-dashed rounded-lg">
+                        <div id="upload-ui" class="space-y-1 text-center">
+                            <svg class="mx-auto h-12 w-12 text-slate-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                            <div class="flex text-sm text-slate-600">
+                                <label for="pdf-file" class="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
+                                    <span>Upload a file</span>
+                                    <input id="pdf-file" name="pdf-file" type="file" class="sr-only" accept="application/pdf" required>
+                                </label>
+                                <p class="pl-1">or drag and drop</p>
+                            </div>
+                            <p id="file-name" class="text-xs text-slate-500">PDF up to 10MB</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Custom Prompt -->
+                <div>
+                    <label for="prompt" class="block text-sm font-medium text-slate-700 mb-1">Analysis Prompt</label>
+                    <textarea id="prompt" name="prompt" rows="4" required class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="e.g., Summarize the key findings in this research paper in five bullet points."></textarea>
+                </div>
+
+                <!-- Submit Button -->
+                <div>
+                    <button type="submit" id="submit-btn" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors disabled:bg-indigo-300 disabled:cursor-not-allowed">
+                        Analyze and Send Email
+                    </button>
+                </div>
+            </form>
+            
+            <!-- Loading and Result Section -->
+            <div id="status-container" class="mt-8 text-center hidden">
+                <div id="loader-container" class="flex flex-col items-center justify-center hidden">
+                    <div class="loader"></div>
+                    <p id="loading-text" class="mt-4 text-slate-600">Reading PDF...</p>
+                </div>
+                <div id="result-container" class="hidden text-left">
+                    <h2 class="text-2xl font-bold text-slate-900 mb-4 text-center">Analysis Complete</h2>
+                    <p class="text-center text-slate-500 mb-6">This is a preview of the email sent to <strong id="result-email"></strong>.</p>
+                    <div class="bg-slate-100 p-4 rounded-lg border border-slate-200">
+                        <p class="font-semibold">Subject: AI Analysis of your document</p>
+                    </div>
+                    <div class="mt-4 p-6 bg-white border border-slate-200 rounded-lg max-h-96 overflow-y-auto result-box">
+                        <h3 class="font-semibold text-lg mb-2">Analysis Results:</h3>
+                        <div id="result-content" class="prose prose-slate max-w-none"></div>
+                    </div>
+                     <button id="reset-btn" class="mt-6 w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">Start New Analysis</button>
+                </div>
+                <div id="error-container" class="hidden text-left bg-red-50 border-l-4 border-red-400 p-4 rounded-md">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium text-red-800">Error</h3>
+                            <div class="mt-2 text-sm text-red-700">
+                                <p id="error-message"></p>
+                            </div>
+                        </div>
+                    </div>
+                     <button id="reset-error-btn" class="mt-4 w-full flex justify-center py-2 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700">Try Again</button>
+                </div>
+            </div>
+        </div>
+        <footer class="text-center mt-6 text-sm text-slate-400">
+            <p>Powered by Gemini AI. Email sending is simulated for this demo.</p>
+        </footer>
+    </div>
+
+    <script>
+        // Set workerSrc for pdf.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+
+        // DOM elements
+        const form = document.getElementById('analysis-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const pdfFileInput = document.getElementById('pdf-file');
+        const fileNameDisplay = document.getElementById('file-name');
+        
+        const statusContainer = document.getElementById('status-container');
+        const loaderContainer = document.getElementById('loader-container');
+        const loadingText = document.getElementById('loading-text');
+        const resultContainer = document.getElementById('result-container');
+        const errorContainer = document.getElementById('error-container');
+        
+        const resultEmail = document.getElementById('result-email');
+        const resultContent = document.getElementById('result-content');
+        const errorMessage = document.getElementById('error-message');
+        
+        const resetBtn = document.getElementById('reset-btn');
+        const resetErrorBtn = document.getElementById('reset-error-btn');
+
+        // Update file name display on file selection
+        pdfFileInput.addEventListener('change', () => {
+            if (pdfFileInput.files.length > 0) {
+                fileNameDisplay.textContent = pdfFileInput.files[0].name;
+                fileNameDisplay.classList.remove('text-slate-500');
+                fileNameDisplay.classList.add('text-indigo-600', 'font-semibold');
+            } else {
+                fileNameDisplay.textContent = 'PDF up to 10MB';
+                fileNameDisplay.classList.add('text-slate-500');
+                fileNameDisplay.classList.remove('text-indigo-600', 'font-semibold');
+            }
+        });
+
+        // Form submission handler
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // Disable button and show loader
+            submitBtn.disabled = true;
+            form.classList.add('hidden');
+            statusContainer.classList.remove('hidden');
+            loaderContainer.classList.remove('hidden');
+            resultContainer.classList.add('hidden');
+            errorContainer.classList.add('hidden');
+
+            const email = document.getElementById('email').value;
+            const promptText = document.getElementById('prompt').value;
+            const pdfFile = pdfFileInput.files[0];
+
+            try {
+                // 1. Read PDF content
+                loadingText.textContent = 'Reading PDF... (this may take a moment)';
+                const pdfText = await readPdf(pdfFile);
+
+                // 2. Call Gemini API for analysis
+                loadingText.textContent = 'Analyzing content with AI...';
+                const analysisResult = await analyzeWithGemini(promptText, pdfText);
+                
+                // 3. Display results
+                displayResults(email, analysisResult);
+
+            } catch (err) {
+                console.error('An error occurred:', err);
+                displayError(err.message || 'An unknown error occurred. Please check the console.');
+            } finally {
+                loaderContainer.classList.add('hidden');
+            }
+        });
+        
+        // Function to read PDF text content
+        async function readPdf(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = async function() {
+                    try {
+                        const typedarray = new Uint8Array(this.result);
+                        const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                        let fullText = '';
+                        for (let i = 1; i <= pdf.numPages; i++) {
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            const pageText = textContent.items.map(s => s.str).join(' ');
+                            fullText += pageText + '\n\n';
+                        }
+                        resolve(fullText);
+                    } catch (error) {
+                        reject(new Error('Could not read the PDF file. It might be corrupted or protected.'));
+                    }
+                };
+                reader.onerror = () => reject(new Error('Failed to read the file.'));
+                reader.readAsArrayBuffer(file);
+            });
+        }
+        
+        // Function to call Gemini API
+        async function analyzeWithGemini(userPrompt, documentText) {
+            const fullPrompt = `
+                Based on the following document text, please perform this task: "${userPrompt}"
+
+                Here is the document text:
+                ---
+                ${documentText}
+                ---
+            `;
+            
+            let chatHistory = [];
+            chatHistory.push({ role: "user", parts: [{ text: fullPrompt }] });
+            const payload = { contents: chatHistory };
+            const apiKey = ""; // API key is handled by the execution environment
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorBody = await response.json();
+                    console.error("API Error Response:", errorBody);
+                    throw new Error(`API request failed with status ${response.status}. ${errorBody.error?.message || ''}`);
+                }
+
+                const result = await response.json();
+                
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    // Simple conversion from Markdown-like text to HTML
+                    let text = result.candidates[0].content.parts[0].text;
+                    text = text.replace(/\n/g, '<br>');
+                    text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); // Bold
+                    text = text.replace(/\*(.*?)\*/g, '<em>$1</em>'); // Italics
+                    return text;
+                } else {
+                    console.error("Unexpected API response structure:", result);
+                    throw new Error('Analysis failed: The AI returned an empty or invalid response.');
+                }
+            } catch(e) {
+                console.error("Fetch failed:", e);
+                throw new Error("Could not connect to the AI service. Please check your network connection.");
+            }
+        }
+        
+        // Function to display results
+        function displayResults(email, analysis) {
+            resultEmail.textContent = email;
+            resultContent.innerHTML = analysis;
+            resultContainer.classList.remove('hidden');
+        }
+
+        // Function to display errors
+        function displayError(message) {
+            errorMessage.textContent = message;
+            errorContainer.classList.remove('hidden');
+        }
+        
+        // Function to reset the entire form
+        function resetForm() {
+            form.reset();
+            fileNameDisplay.textContent = 'PDF up to 10MB';
+            fileNameDisplay.classList.add('text-slate-500');
+            fileNameDisplay.classList.remove('text-indigo-600', 'font-semibold');
+            
+            submitBtn.disabled = false;
+            form.classList.remove('hidden');
+            statusContainer.classList.add('hidden');
+            loaderContainer.classList.add('hidden');
+            resultContainer.classList.add('hidden');
+            errorContainer.classList.add('hidden');
+        }
+        
+        // Event listeners for reset buttons
+        resetBtn.addEventListener('click', resetForm);
+        resetErrorBtn.addEventListener('click', resetForm);
+
+    </script>
+</body>
+</html>
