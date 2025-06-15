@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PDF Analysis and Emailing Tool</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
@@ -29,7 +28,7 @@
             </div>
             <form id="analysis-form" class="space-y-6">
                 <div>
-                    <label for="email" class="block text-sm font-medium text-slate-700 mb-1">Recipient Email</label>
+                    <label for="email" class="block text-sm font-medium text-slate-700 mb-1">Recipient Email (Simulation)</label>
                     <input type="email" id="email" name="email" required class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="you@example.com">
                 </div>
                 <div>
@@ -47,7 +46,7 @@
                 </div>
                 <div>
                     <label for="prompt" class="block text-sm font-medium text-slate-700 mb-1">Analysis Prompt</label>
-                    <textarea id="prompt" name="prompt" rows="4" required class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder="e.g., Summarize this document in three bullet points."></textarea>
+                    <textarea id="prompt" name="prompt" rows="4" required class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500" placeholder='list all the courses that are still required, pay close attention to course numbers, and output full lists, no omissions. Expected Outcome: Short report with the results of the analysis.'></textarea>
                 </div>
                 <div>
                     <button type="submit" id="submit-btn" class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-300">Analyze</button>
@@ -61,8 +60,82 @@
         </div>
     </div>
     <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
-        const form=document.getElementById("analysis-form"),submitBtn=document.getElementById("submit-btn"),pdfFileInput=document.getElementById("pdf-file"),fileNameDisplay=document.getElementById("file-name"),statusContainer=document.getElementById("status-container"),loaderContainer=document.getElementById("loader-container"),loadingText=document.getElementById("loading-text"),resultContainer=document.getElementById("result-container"),errorContainer=document.getElementById("error-container"),resultContent=document.getElementById("result-content"),errorMessage=document.getElementById("error-message"),resetBtn=document.getElementById("reset-btn"),resetErrorBtn=document.getElementById("reset-error-btn");pdfFileInput.addEventListener("change",(()=>{pdfFileInput.files.length>0?fileNameDisplay.textContent=pdfFileInput.files[0].name:fileNameDisplay.textContent="PDF up to 10MB"}));form.addEventListener("submit",(async e=>{e.preventDefault(),submitBtn.disabled=!0,form.classList.add("hidden"),statusContainer.classList.remove("hidden"),loaderContainer.classList.remove("hidden"),resultContainer.classList.add("hidden"),errorContainer.classList.add("hidden");const t=document.getElementById("prompt").value,n=pdfFileInput.files[0];try{loadingText.textContent="Reading PDF...",loadingText.textContent="Analyzing content with AI...";const e=await readPdf(n),s=await analyzeWithOpenAI(t,e);document.getElementById("result-content").innerHTML=s,resultContainer.classList.remove("hidden")}catch(e){console.error("An error occurred:",e),errorMessage.textContent=e.message||"An unknown error occurred.",errorContainer.classList.remove("hidden")}finally{loaderContainer.classList.add("hidden")}}));async function readPdf(e){return new Promise(((t,n)=>{const s=new FileReader;s.onload=async function(){try{const n=new Uint8Array(this.result),s=await pdfjsLib.getDocument(n).promise;let o="";for(let e=1;e<=s.numPages;e++){const t=await s.getPage(e),n=await t.getTextContent(),r=n.items.map((e=>e.str)).join(" ");o+=r+"\n\n"}t(o)}catch(e){n(new Error("Could not read the PDF file."))}},s.onerror=()=>n(new Error("Failed to read the file.")),s.readAsArrayBuffer(e)}))}async function analyzeWithOpenAI(e,t){const n={prompt:e,text:t};try{const e=await fetch("/.netlify/functions/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(n)}),s=await e.json();if(!e.ok)throw new Error(s.error||"The analysis request failed.");let o=s.analysis;return o=o.replace(/\n/g,"<br>"),o=o.replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>"),o.replace(/\*(.*?)\*/g,"<em>$1</em>")}catch(e){throw console.error("Fetch failed:",e),new Error("Could not connect to the analysis service.")}}function resetForm(){form.reset(),fileNameDisplay.textContent="PDF up to 10MB",submitBtn.disabled=!1,form.classList.remove("hidden"),statusContainer.classList.add("hidden"),loaderContainer.classList.add("hidden"),resultContainer.classList.add("hidden"),errorContainer.classList.add("hidden")}resetBtn.addEventListener("click",resetForm),resetErrorBtn.addEventListener("click",resetForm);
+        const form = document.getElementById("analysis-form");
+        const submitBtn = document.getElementById("submit-btn");
+        const pdfFileInput = document.getElementById("pdf-file");
+        const fileNameDisplay = document.getElementById("file-name");
+        const statusContainer = document.getElementById("status-container");
+        const loaderContainer = document.getElementById("loader-container");
+        const loadingText = document.getElementById("loading-text");
+        const resultContainer = document.getElementById("result-container");
+        const errorContainer = document.getElementById("error-container");
+        const resultContent = document.getElementById("result-content");
+        const errorMessage = document.getElementById("error-message");
+        const resetBtn = document.getElementById("reset-btn");
+        const resetErrorBtn = document.getElementById("reset-error-btn");
+
+        pdfFileInput.addEventListener("change", () => {
+            if (pdfFileInput.files.length > 0) {
+                fileNameDisplay.textContent = pdfFileInput.files[0].name;
+            } else {
+                fileNameDisplay.textContent = "PDF up to 10MB";
+            }
+        });
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            submitBtn.disabled = true;
+            form.classList.add("hidden");
+            statusContainer.classList.remove("hidden");
+            loaderContainer.classList.remove("hidden");
+            resultContainer.classList.add("hidden");
+            errorContainer.classList.add("hidden");
+
+            loadingText.textContent = "Uploading and analyzing file...";
+            
+            const formData = new FormData();
+            formData.append('prompt', document.getElementById('prompt').value);
+            formData.append('file', pdfFileInput.files[0]);
+
+            try {
+                const response = await fetch("/.netlify/functions/analyze", {
+                    method: "POST",
+                    body: formData,
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || "The analysis request failed.");
+                }
+
+                let analysis = result.analysis;
+                analysis = analysis.replace(/\n/g, "<br>");
+                analysis = analysis.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+                analysis = analysis.replace(/\*(.*?)\*/g, "<em>$1</em>");
+                
+                resultContent.innerHTML = analysis;
+                resultContainer.classList.remove("hidden");
+
+            } catch (err) {
+                console.error("An error occurred:", err);
+                errorMessage.textContent = err.message || "An unknown error occurred.";
+                errorContainer.classList.remove("hidden");
+            } finally {
+                loaderContainer.classList.add("hidden");
+            }
+        });
+
+        function resetForm() {
+            form.reset();
+            fileNameDisplay.textContent = "PDF up to 10MB";
+            submitBtn.disabled = false;
+            form.classList.remove("hidden");
+            statusContainer.classList.add("hidden");
+        }
+
+        resetBtn.addEventListener("click", resetForm);
+        resetErrorBtn.addEventListener("click", resetForm);
     </script>
 </body>
 </html>
