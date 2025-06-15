@@ -1,61 +1,136 @@
-// Use require to import the node-fetch package.
-const fetch = require('node-fetch');
+const OpenAI = require('openai');
+const Busboy = require('busboy');
+const { Readable } = require('stream');
 
-exports.handler = async function(event, context) {
-    // Only allow POST requests.
-    if (event.httpMethod !== 'POST') {
-        return { statusCode: 405, body: 'Method Not Allowed' };
-    }
-
-    try {
-        // Get the secret API key from Netlify's environment variables.
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey) {
-            throw new Error('API key is not set on the server.');
-        }
-
-        // Get the data sent from the frontend.
-        const { prompt, text } = JSON.parse(event.body);
-        if (!prompt || !text) {
-            return { statusCode: 400, body: JSON.stringify({ error: 'Missing prompt or text.' }) };
-        }
-
-        const fullPrompt = `Based on the following document text, please perform this task: "${prompt}"\n\nHere is the document text:\n---\n${text}`;
-        
-        const payload = {
-            model: "gpt-3.5-turbo",
-            messages: [{ role: "user", content: fullPrompt }]
-        };
-
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
+// Helper function to parse multipart/form-data
+function parseMultipartForm(event) {
+    return new Promise((resolve, reject) => {
+        const busboy = Busboy({
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify(payload)
+                'content-type': event.headers['content-type'] || event.headers['Content-Type']
+            }
         });
 
-        const result = await response.json();
+        const result = {
+            files: [],
+            fields: {}
+        };
 
-        if (!response.ok) {
-            console.error("OpenAI API Error:", result);
-            return { statusCode: response.status, body: JSON.stringify({ error: result.error?.message || 'Failed to get a response from OpenAI.' }) };
+        busboy.on('file', (fieldname, file, G) => {
+            const chunks = [];
+            file.on('data', (chunk) => {
+                chunks.push(chunk);
+            });
+            file.on('end', () => {
+                result.files.push({
+                    fieldname,
+                    file: Buffer.concat(chunks),
+                    filename: G.filename,
+                    mimeType: G.mimeType,
+                });
+            });
+        });
+
+        busboy.on('field', (fieldname, val) => {
+            result.fields[fieldname] = val;
+        });
+
+        busboy.on('finish', () => {
+            resolve(result);
+        });
+
+        busboy.on('error', err => reject(err));
+
+        // Create a readable stream from the base64 encoded body
+        const bodyBuffer = Buffer.from(event.body, 'base64');
+        const stream = new Readable();
+        stream.push(bodyBuffer);
+        stream.push(null);
+        stream.pipe(busboy);
+    });
+}
+
+exports.handler = async function(event) {
+    if (event.httpMethod !== 'POST') {
+        return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+    }
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+        return { statusCode: 500, body: JSON.stringify({ error: 'API key is not set on the server.' }) };
+    }
+    
+    const openai = new OpenAI({ apiKey });
+
+    try {
+        const { files, fields } = await parseMultipartForm(event);
+        const prompt = fields.prompt;
+        const pdfFile = files[0];
+
+        if (!prompt || !pdfFile) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'Missing prompt or PDF file.' }) };
         }
         
-        const analysis = result.choices[0]?.message?.content || 'No analysis was returned.';
+        // Step 1: Upload the file to OpenAI
+        const file = await openai.files.create({
+            file: pdfFile.file, // Pass the buffer directly
+            purpose: 'assistants',
+        });
+        
+        // Step 2: Create an Assistant
+        const assistant = await openai.beta.assistants.create({
+            name: "PDF Analyzer Assistant",
+            instructions: "You are an assistant that analyzes PDF documents. Answer user questions based on the content of the provided files.",
+            model: "gpt-4o",
+            tools: [{ type: "file_search" }]
+        });
+        
+        // Step 3: Create a Thread and add the user's message and file
+        const thread = await openai.beta.threads.create({
+            messages: [{
+                role: "user",
+                content: prompt,
+                attachments: [{
+                    file_id: file.id,
+                    tools: [{ type: "file_search" }]
+                }]
+            }]
+        });
+        
+        // Step 4: Create a Run and wait for it to complete
+        let run = await openai.beta.threads.runs.create(thread.id, {
+            assistant_id: assistant.id,
+        });
 
-        // Send the successful analysis back to the frontend.
+        while (run.status === 'in_progress' || run.status === 'queued') {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second
+            run = await openai.beta.threads.runs.retrieve(thread.id, run.id);
+        }
+
+        if (run.status !== 'completed') {
+            throw new Error(`Run failed with status: ${run.status}`);
+        }
+
+        // Step 5: Retrieve the messages from the thread
+        const messages = await openai.beta.threads.messages.list(thread.id);
+        const assistantMessage = messages.data.find(m => m.role === 'assistant');
+        const analysis = assistantMessage ? assistantMessage.content[0].text.value : 'No analysis was returned.';
+
+        // Step 6: Clean up the created resources on OpenAI
+        await openai.beta.assistants.del(assistant.id);
+        await openai.files.del(file.id);
+        await openai.beta.threads.del(thread.id);
+
         return {
             statusCode: 200,
-            body: JSON.stringify({ analysis: analysis })
+            body: JSON.stringify({ analysis: analysis }),
         };
 
     } catch (error) {
         console.error('Function Error:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: error.message || 'An internal server error occurred.' })
+            body: JSON.stringify({ error: error.message || 'An internal server error occurred.' }),
         };
     }
 };
