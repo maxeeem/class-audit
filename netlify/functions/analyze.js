@@ -57,6 +57,12 @@ exports.handler = async function(event) {
         return { statusCode: 500, body: JSON.stringify({ error: 'API key is not set on the server.' }) };
     }
 
+    // Common headers for all OpenAI Assistants API requests
+    const openaiHeaders = {
+        'Authorization': `Bearer ${apiKey}`,
+        'OpenAI-Beta': 'assistants=v2',
+    };
+
     try {
         const { file: pdfFile, prompt } = await parseMultipartForm(event);
 
@@ -75,14 +81,14 @@ exports.handler = async function(event) {
         const uploadRes = await axios.post('https://api.openai.com/v1/files', formData, {
             headers: {
                 ...formData.getHeaders(),
-                'Authorization': `Bearer ${apiKey}`,
+                ...openaiHeaders,
             },
         });
         const fileId = uploadRes.data.id;
 
         // 2. Create a thread
         const threadRes = await axios.post('https://api.openai.com/v1/threads', {}, {
-            headers: { 'Authorization': `Bearer ${apiKey}` },
+            headers: openaiHeaders,
         });
         const threadId = threadRes.data.id;
 
@@ -92,7 +98,7 @@ exports.handler = async function(event) {
             content: prompt,
             attachments: [{ file_id: fileId, tools: ['retrieval'] }],
         }, {
-            headers: { 'Authorization': `Bearer ${apiKey}` },
+            headers: openaiHeaders,
         });
 
         // 4. Run the assistant (replace with your Assistant ID)
@@ -103,7 +109,7 @@ exports.handler = async function(event) {
         const runRes = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, {
             assistant_id: assistantId,
         }, {
-            headers: { 'Authorization': `Bearer ${apiKey}` },
+            headers: openaiHeaders,
         });
         const runId = runRes.data.id;
 
@@ -113,7 +119,7 @@ exports.handler = async function(event) {
         for (let i = 0; i < 30 && runStatus === 'in_progress'; i++) {
             await new Promise(res => setTimeout(res, 2000));
             const statusRes = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
-                headers: { 'Authorization': `Bearer ${apiKey}` },
+                headers: openaiHeaders,
             });
             runStatus = statusRes.data.status;
         }
@@ -122,7 +128,7 @@ exports.handler = async function(event) {
         }
         // 6. Get the latest message from the thread
         const messagesRes = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-            headers: { 'Authorization': `Bearer ${apiKey}` },
+            headers: openaiHeaders,
         });
         const messages = messagesRes.data.data;
         const lastMessage = messages.find(m => m.role === 'assistant');
