@@ -1,5 +1,5 @@
-// The fetch function is not available by default in this environment, so we import it.
-import fetch from 'node-fetch';
+// Use require to import the node-fetch package.
+const fetch = require('node-fetch');
 
 exports.handler = async function(event, context) {
     // Only allow POST requests.
@@ -11,7 +11,7 @@ exports.handler = async function(event, context) {
         // Get the secret API key from Netlify's environment variables.
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {
-            throw new Error('API key is not set.');
+            throw new Error('API key is not set on the server.');
         }
 
         // Get the data sent from the frontend.
