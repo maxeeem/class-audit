@@ -96,7 +96,7 @@ exports.handler = async function(event) {
         const messageRes = await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, {
             role: 'user',
             content: prompt,
-            attachments: [{ file_id: fileId, tools: ['retrieval'] }],
+            attachments: [{ file_id: fileId, tools: [{ type: 'retrieval' }] }],
         }, {
             headers: openaiHeaders,
         });
