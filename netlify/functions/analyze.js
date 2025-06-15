@@ -1,6 +1,8 @@
 const { OpenAI } = require('openai');
 const Busboy = require('busboy');
 const { Readable } = require('stream');
+const axios = require('axios');
+const FormData = require('form-data');
 
 // Helper function to parse the multipart/form-data from the browser
 function parseMultipartForm(event) {
@@ -54,8 +56,6 @@ exports.handler = async function(event) {
     if (!apiKey) {
         return { statusCode: 500, body: JSON.stringify({ error: 'API key is not set on the server.' }) };
     }
-    
-    const openai = new OpenAI({ apiKey });
 
     try {
         const { file: pdfFile, prompt } = await parseMultipartForm(event);
@@ -63,28 +63,70 @@ exports.handler = async function(event) {
         if (!prompt || !pdfFile) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Missing prompt or PDF file.' }) };
         }
-        
-        // Convert the file buffer to a base64 string for the API
-        const base64pdf = pdfFile.buffer.toString('base64');
 
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o",
-            messages: [{
-                role: "user",
-                content: [
-                    { type: "text", text: prompt },
-                    { 
-                        type: "image_url", // For PDFs, we use image_url type with a data URI
-                        image_url: {
-                            url: `data:application/pdf;base64,${base64pdf}`
-                        }
-                    }
-                ],
-            }],
-            max_tokens: 1500,
+        // 1. Upload the PDF to OpenAI's file storage
+        const formData = new FormData();
+        formData.append('file', pdfFile.buffer, {
+            filename: pdfFile.filename,
+            contentType: pdfFile.mimeType || 'application/pdf',
+        });
+        formData.append('purpose', 'assistants');
+
+        const uploadRes = await axios.post('https://api.openai.com/v1/files', formData, {
+            headers: {
+                ...formData.getHeaders(),
+                'Authorization': `Bearer ${apiKey}`,
+            },
+        });
+        const fileId = uploadRes.data.id;
+
+        // 2. Create a thread
+        const threadRes = await axios.post('https://api.openai.com/v1/threads', {}, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+        });
+        const threadId = threadRes.data.id;
+
+        // 3. Add a message to the thread with the file and prompt
+        const messageRes = await axios.post(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+            role: 'user',
+            content: prompt,
+            attachments: [{ file_id: fileId, tools: ['retrieval'] }],
+        }, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
         });
 
-        const analysis = response.choices[0]?.message?.content || 'No analysis was returned.';
+        // 4. Run the assistant (replace with your Assistant ID)
+        const assistantId = process.env.OPENAI_ASSISTANT_ID; // Set this in your environment
+        if (!assistantId) {
+            return { statusCode: 500, body: JSON.stringify({ error: 'Assistant ID is not set on the server.' }) };
+        }
+        const runRes = await axios.post(`https://api.openai.com/v1/threads/${threadId}/runs`, {
+            assistant_id: assistantId,
+        }, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+        });
+        const runId = runRes.data.id;
+
+        // 5. Poll for completion
+        let runStatus = 'in_progress';
+        let analysis = '';
+        for (let i = 0; i < 30 && runStatus === 'in_progress'; i++) {
+            await new Promise(res => setTimeout(res, 2000));
+            const statusRes = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
+                headers: { 'Authorization': `Bearer ${apiKey}` },
+            });
+            runStatus = statusRes.data.status;
+        }
+        if (runStatus !== 'completed') {
+            return { statusCode: 500, body: JSON.stringify({ error: 'Analysis did not complete in time.' }) };
+        }
+        // 6. Get the latest message from the thread
+        const messagesRes = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+        });
+        const messages = messagesRes.data.data;
+        const lastMessage = messages.find(m => m.role === 'assistant');
+        analysis = lastMessage?.content?.map(c => c.text?.value).join('\n') || 'No analysis was returned.';
 
         return {
             statusCode: 200,
@@ -92,10 +134,10 @@ exports.handler = async function(event) {
         };
 
     } catch (error) {
-        console.error('Function Error:', error);
+        console.error('Function Error:', error?.response?.data || error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: error.message || 'An internal server error occurred.' }),
+            body: JSON.stringify({ error: error?.response?.data?.error?.message || error.message || 'An internal server error occurred.' }),
         };
     }
 };

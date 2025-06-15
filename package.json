@@ -10,6 +10,8 @@
   "license": "ISC",
   "dependencies": {
     "openai": "^4.47.1",
-    "busboy": "^1.6.0"
+    "busboy": "^1.6.0",
+    "axios": "^1.6.8",
+    "form-data": "^4.0.0"
   }
 }
