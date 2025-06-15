@@ -113,30 +113,10 @@ exports.handler = async function(event) {
         });
         const runId = runRes.data.id;
 
-        // 5. Poll for completion
-        let runStatus = 'in_progress';
-        let analysis = '';
-        for (let i = 0; i < 30 && runStatus === 'in_progress'; i++) {
-            await new Promise(res => setTimeout(res, 2000));
-            const statusRes = await axios.get(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
-                headers: openaiHeaders,
-            });
-            runStatus = statusRes.data.status;
-        }
-        if (runStatus !== 'completed') {
-            return { statusCode: 500, body: JSON.stringify({ error: 'Analysis did not complete in time.' }) };
-        }
-        // 6. Get the latest message from the thread
-        const messagesRes = await axios.get(`https://api.openai.com/v1/threads/${threadId}/messages`, {
-            headers: openaiHeaders,
-        });
-        const messages = messagesRes.data.data;
-        const lastMessage = messages.find(m => m.role === 'assistant');
-        analysis = lastMessage?.content?.map(c => c.text?.value).join('\n') || 'No analysis was returned.';
-
+        // Return threadId and runId for polling
         return {
             statusCode: 200,
-            body: JSON.stringify({ analysis }),
+            body: JSON.stringify({ threadId, runId }),
         };
 
     } catch (error) {

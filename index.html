@@ -98,22 +98,35 @@
             formData.append('file', pdfFileInput.files[0]);
 
             try {
+                // Step 1: Start analysis and get threadId/runId
                 const response = await fetch("/.netlify/functions/analyze", {
                     method: "POST",
                     body: formData,
                 });
-
                 const result = await response.json();
+                if (!response.ok) throw new Error(result.error || "The analysis request failed.");
+                const { threadId, runId } = result;
+                if (!threadId || !runId) throw new Error("Failed to start analysis.");
 
-                if (!response.ok) {
-                    throw new Error(result.error || "The analysis request failed.");
+                // Step 2: Poll for completion
+                loadingText.textContent = "Analyzing PDF with AI...";
+                let status = "in_progress";
+                let analysis = "";
+                for (let i = 0; i < 30 && status === "in_progress"; i++) {
+                    await new Promise(res => setTimeout(res, 2000));
+                    const pollRes = await fetch(`/.netlify/functions/check-status?threadId=${threadId}&runId=${runId}`);
+                    const pollData = await pollRes.json();
+                    if (pollData.status === "completed") {
+                        analysis = pollData.analysis;
+                        status = "completed";
+                        break;
+                    } else if (pollData.status && pollData.status !== "in_progress") {
+                        throw new Error("Analysis failed or was cancelled.");
+                    }
                 }
-
-                let analysis = result.analysis.replace(/\n/g, "<br>");
-                
-                resultContent.innerHTML = analysis;
+                if (status !== "completed") throw new Error("Analysis did not complete in time.");
+                resultContent.innerHTML = (analysis || "No analysis was returned.").replace(/\n/g, "<br>");
                 resultContainer.classList.remove("hidden");
-
             } catch (err) {
                 console.error("An error occurred:", err);
                 errorMessage.textContent = err.message || "An unknown error occurred.";
